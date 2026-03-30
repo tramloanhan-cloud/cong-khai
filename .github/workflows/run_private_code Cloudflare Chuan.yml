@@ -1,10 +1,7 @@
 name: run-private-code
 
 on:
-  schedule:
-    - cron: '0 22 * * *'   # 11:00 VN
-    - cron: '0 4 * * *'   # 13:00 VN
-    - cron: '0 10 * * *'   # 16:00 VN
+  
     
   workflow_dispatch: {}
 
@@ -23,17 +20,17 @@ jobs:
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
-      # chọn thumb tiêu đề bắt đầu
+      # chon thumb tieude bat dau
       SEQ_BASE_RUN: "1"
       TITLE_START: "1"
       THUMB_START: "1"
 
-      # công tắc chọn poll hoặc cloudflare
+      # công tắt chọn poll hoặc cloudflare
       IMG_PROVIDER: cloudflare
       CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
       CF_API_TOKEN:  ${{ secrets.CF_API_TOKEN }}
       CF_MODEL: "@cf/black-forest-labs/flux-1-schnell"
-      CF_STEPS: "8"
+      CF_STEPS: "4"
 
     steps:
       - name: Checkout wrapper (repo PUBLIC)
@@ -41,7 +38,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Quyết định mode auth (không dùng secrets trực tiếp trong if)
       - name: Determine auth mode
         id: auth
         env:
@@ -56,19 +52,17 @@ jobs:
             echo "mode=none" >> "$GITHUB_OUTPUT"
           fi
 
-      # support chạy không truyền inputs
       - name: Resolve parameters (support schedule without inputs)
         id: params
         run: |
-          repo="${{ inputs.private_repo }}"; [ -z "$repo" ] && repo="traanfthanhfft3-collab/rieng-tu"; echo "repo=$repo" >> "$GITHUB_OUTPUT"
-          ref="${{ inputs.private_ref }}";   [ -z "$ref" ] && ref="main";                   echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          wd="${{ inputs.workdir }}";        [ -z "$wd" ]  && wd=".";                       echo "workdir=$wd" >> "$GITHUB_OUTPUT"
-          privacy="${{ inputs.youtube_privacy }}"; [ -z "$privacy" ] && privacy="public";   echo "privacy=$privacy" >> "$GITHUB_OUTPUT"
+          repo="${{ inputs.private_repo }}"; [ -z "$repo" ] && repo="tramloanhan-cloud/rieng-tu"; echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          ref="${{ inputs.private_ref }}";   [ -z "$ref" ] && ref="main";                                           echo "ref=$ref"   >> "$GITHUB_OUTPUT"
+          wd="${{ inputs.workdir }}";        [ -z "$wd" ]  && wd=".";                                               echo "workdir=$wd" >> "$GITHUB_OUTPUT"
+          privacy="${{ inputs.youtube_privacy }}"; [ -z "$privacy" ] && privacy="public";                           echo "privacy=$privacy" >> "$GITHUB_OUTPUT"
 
       - name: Export resolved privacy to env
         run: echo "YOUTUBE_PRIVACY=${{ steps.params.outputs.privacy }}" >> "$GITHUB_ENV"
 
-      # Kéo code từ repo PRIVATE (PAT)
       - name: Checkout PRIVATE via PAT
         if: ${{ steps.auth.outputs.mode == 'pat' }}
         uses: actions/checkout@v4
@@ -80,7 +74,6 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           persist-credentials: false
 
-      # Kéo code từ repo PRIVATE (SSH)
       - name: Checkout PRIVATE via SSH Deploy Key
         if: ${{ steps.auth.outputs.mode == 'ssh' }}
         uses: actions/checkout@v4
@@ -105,7 +98,6 @@ jobs:
           echo "== 20 files in commit =="
           git ls-tree -r --name-only HEAD | head -n 20
 
-      # Tự tìm thư mục chứa scripts/generate_thumbnails.py
       - name: Detect script path
         id: find_script
         run: |
@@ -116,7 +108,7 @@ jobs:
           if [ -n "$DEFAULT" ] && [ -f "$BASE/$DEFAULT/scripts/generate_thumbnails.py" ]; then
             CAND="$BASE/$DEFAULT"
           else
-            CAND=$(cd "$BASE" && find . -type f -path "*/scripts/generate_thumbnails.py" -print -quit | sed 's|^\./||' | xargs -I{} dirname {})
+            CAND=$(cd "$BASE" && find . -type f -path "*/scripts/generate_thumbnails.py" -print -quit | sed 's|^\./||' | xargs -I{} dirname {} )
             [ -n "$CAND" ] && CAND="$BASE/$CAND"
           fi
           if [ -z "$CAND" ]; then
@@ -126,7 +118,6 @@ jobs:
           echo "dir=$CAND" >> "$GITHUB_OUTPUT"
           echo "[FOUND] $CAND"
 
-      # Bắt buộc có secrets YT để upload thẳng
       - name: Require YT OAuth secrets
         shell: bash
         run: |
@@ -145,7 +136,7 @@ jobs:
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install system deps (ffmpeg)
         run: |
@@ -160,52 +151,60 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      # ===== FIX CHÍNH =====
       - name: Install Python libs
-        working-directory: ${{ steps.find_script.outputs.dir }}
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip wheel
+          # PIN cứng setuptools có pkg_resources
+          python -m pip install --force-reinstall --no-deps "setuptools==80.9.0"
+          python -c "import setuptools, pkg_resources; print('setuptools=', setuptools.__version__, 'pkg_resources OK')"
 
-          # Giữ pkg_resources cho whisper build
-          python -m pip install --force-reinstall "setuptools==69.5.1" "wheel==0.43.0" packaging
-          python -c "import pkg_resources; print('pkg_resources OK')"
+          # Libs ảnh / video phụ trợ
+          python -m pip install pillow opencv-python-headless numpy gdown imageio-ffmpeg
+          # Google API (nếu upload YouTube)
+          python -m pip install google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib
+          # Torch CPU + Torchaudio (đúng index CPU)
+          python -m pip install "torch==2.3.1" "torchaudio==2.3.1" --index-url https://download.pytorch.org/whl/cpu
+          # Whisper (gói đúng tên: openai-whisper)
+          python -m pip install "openai-whisper==20231117"
 
-          # Cài deps từ requirements đã pin numpy/opencv
-          if [ -f requirements.txt ]; then
-            python -m pip install -r requirements.txt
+          # YAMNet (TensorFlow) để lọc nhạc
+          python -m pip install tensorflow-cpu tensorflow-hub
+
+          # loc banner qr (giữ như bạn)
+          python -m pip install opencv-python-headless
+
+          python -c "import whisper, torch, torchaudio; print('Whisper/Torch OK:', whisper.__version__, torch.__version__)"
+
+      - name: Install Python deps
+        run: |
+          set -e
+          REQ=$(ls private-src/**/requirements*.txt 2>/dev/null | head -n1 || true)
+          if [ -n "$REQ" ]; then
+            echo "[INFO] Using requirements: $REQ"
+            python -m pip install -r "$REQ"
           else
-            echo "::warning::Không thấy requirements.txt trong $PWD, cài tối thiểu fallback."
-            python -m pip install \
-              Pillow==10.3.0 \
-              opencv-python-headless==4.10.0.84 \
-              numpy==1.26.4 \
-              imageio-ffmpeg yt-dlp gdown \
-              google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib \
-              requests google-genai
+            echo "[INFO] No requirements*.txt found — install tối thiểu"
+            python -m pip install Pillow opencv-python-headless numpy gdown \
+              google-api-python-client google-auth google-auth-httplib2 \
+              imageio-ffmpeg tensorflow-cpu tensorflow-hub
           fi
 
-          # Torch CPU + torchaudio
-          python -m pip install "torch==2.3.1" "torchaudio==2.3.1" --index-url https://download.pytorch.org/whl/cpu
+          # CHỐT LẠI setuptools sau khi cài requirements (để requirements không kéo lên bản mới)
+          python -m pip install --force-reinstall --no-deps "setuptools==80.9.0"
+          python -c "import setuptools, pkg_resources; print('FINAL setuptools=', setuptools.__version__, 'pkg_resources OK')"
 
-          # Re-pin lại backend build (tránh requirements kéo lệch)
-          python -m pip install --force-reinstall "setuptools==69.5.1" "wheel==0.43.0"
-          python -c "import pkg_resources; print('pkg_resources still OK')"
+      # QUAN TRỌNG: chốt lần cuối ngay trước khi chạy pipeline (để hết kiểu lúc được lúc không)
+      - name: Ensure pkg_resources before running
+        run: |
+          python -m pip install --force-reinstall --no-deps "setuptools==80.9.0"
+          python -c "import pkg_resources; print('pkg_resources OK')"
 
-          # Cài whisper KHÔNG build isolation
-          python -m pip install --no-build-isolation --no-cache-dir "openai-whisper==20231117"
-
-          # Verify
-          python -c "import whisper, torch, torchaudio, numpy, cv2, pkg_resources; print('ALL OK:', whisper.__version__, torch.__version__)"
-          python -m pip check || true
-
-      # Chạy code trong repo PRIVATE
       - name: Run pipeline in PRIVATE
         working-directory: ${{ steps.find_script.outputs.dir }}
         run: |
           set -e
           python -u scripts/generate_thumbnails.py
 
-      # Commit & PUSH CSV về repo PRIVATE qua PAT
       - name: Commit & push state CSVs back to PRIVATE (PAT)
         if: ${{ steps.auth.outputs.mode == 'pat' }}
         working-directory: private-src
@@ -216,7 +215,7 @@ jobs:
           PRIVATE_REF: ${{ steps.params.outputs.ref }}
           DIR_FOUND: ${{ steps.find_script.outputs.dir }}
         run: |
-          set -euo pipefail
+          set -e
           TOKEN="${PUSH_TOKEN_1:-$PUSH_TOKEN_2}"
           [ -z "$TOKEN" ] && { echo "::warning::Không có token có quyền ghi. Bỏ qua commit."; exit 0; }
 
@@ -237,24 +236,8 @@ jobs:
           git add -- $FILES
           git diff --cached --quiet && { echo "[INFO] Không có thay đổi."; exit 0; }
           git commit -m "ci(state): update promptdalay.csv, links_done.csv, tieudedalay.csv"
+          git push origin HEAD:"${PRIVATE_REF}"
 
-          # Giảm lỗi non-fast-forward khi có job khác vừa push
-          git pull --rebase origin "${PRIVATE_REF}" || true
-
-          # Retry push để vượt lỗi GitHub 5xx tạm thời
-          for i in 1 2 3 4 5; do
-            if git push origin HEAD:"${PRIVATE_REF}"; then
-              echo "[OK] Push thành công."
-              exit 0
-            fi
-            echo "::warning::Push fail lần $i. Retry sau $((i*5))s..."
-            sleep $((i*5))
-          done
-
-          echo "::error::Push thất bại sau 5 lần retry."
-          exit 1
-
-      # Commit & PUSH CSV về repo PRIVATE qua SSH
       - name: Commit & push state CSVs back to PRIVATE (SSH)
         if: ${{ steps.auth.outputs.mode == 'ssh' }}
         working-directory: private-src
@@ -264,7 +247,7 @@ jobs:
           PRIVATE_REF: ${{ steps.params.outputs.ref }}
           DIR_FOUND: ${{ steps.find_script.outputs.dir }}
         run: |
-          set -euo pipefail
+          set -e
           [ -z "$PRIVATE_SSH_KEY" ] && { echo "::warning::Thiếu PRIVATE_SSH_KEY. Bỏ qua commit."; exit 0; }
 
           install -m 700 -d ~/.ssh
@@ -291,19 +274,4 @@ jobs:
           git add -- $FILES
           git diff --cached --quiet && { echo "[INFO] Không có thay đổi."; exit 0; }
           git commit -m "ci(state): update promptdalay.csv, links_done.csv, tieudedalay.csv"
-
-          # Giảm lỗi non-fast-forward khi có job khác vừa push
-          git pull --rebase origin "${PRIVATE_REF}" || true
-
-          # Retry push để vượt lỗi GitHub 5xx tạm thời
-          for i in 1 2 3 4 5; do
-            if git push origin HEAD:"${PRIVATE_REF}"; then
-              echo "[OK] Push thành công."
-              exit 0
-            fi
-            echo "::warning::Push fail lần $i. Retry sau $((i*5))s..."
-            sleep $((i*5))
-          done
-
-          echo "::error::Push thất bại sau 5 lần retry."
-          exit 1
+          git push origin HEAD:"${PRIVATE_REF}"
