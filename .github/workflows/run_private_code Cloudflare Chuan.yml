@@ -21,7 +21,7 @@ jobs:
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
       # chon thumb tieude bat dau
-      SEQ_BASE_RUN: "1"
+      SEQ_BASE_RUN: "2"
       TITLE_START: "1"
       THUMB_START: "1"
 
@@ -164,8 +164,8 @@ jobs:
           python -m pip install google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib
           # Torch CPU + Torchaudio (đúng index CPU)
           python -m pip install "torch==2.3.1" "torchaudio==2.3.1" --index-url https://download.pytorch.org/whl/cpu
-          # Whisper (gói đúng tên: openai-whisper)
-          python -m pip install "openai-whisper==20231117"
+          # Cài whisper KHÔNG build isolation
+          python -m pip install --no-build-isolation --no-cache-dir "openai-whisper==20231117"
 
           # YAMNet (TensorFlow) để lọc nhạc
           python -m pip install tensorflow-cpu tensorflow-hub
